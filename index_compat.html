@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>十人副本报名接龙（网页表单·兼容版）</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121821; --muted:#9fb0c0; --text:#e7eef5; --accent:#5bb7ff; --danger:#ff6b6b; --ok:#6bffaa; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    .wrap { max-width: 1050px; margin: 32px auto; padding: 0 16px; }
+    .title { font-size: 26px; font-weight: 800; display:flex; align-items:center; gap:10px; }
+    .muted { color: var(--muted); }
+    .row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .card { background: var(--card); border: 1px solid #1e2733; border-radius: 14px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .controls { display:grid; grid-template-columns: 1.2fr 0.8fr 1fr auto; gap:12px; }
+    .controls input, .controls select, .controls button { height: 44px; border-radius: 10px; border: 1px solid #223044; background:#0f151e; color: var(--text); padding: 0 12px; font-size: 15px; }
+    .controls button { background: linear-gradient(180deg,#1a2940,#152235); border-color:#2b3b55; cursor:pointer; }
+    .controls button:hover { filter: brightness(1.06); }
+    .btns { display:flex; gap:10px; flex-wrap:wrap; }
+    .btn { padding:10px 14px; border-radius:10px; border:1px solid #2b3b55; background:#0f151e; color:var(--text); cursor:pointer; font-size:14px; }
+    .btn:hover { filter:brightness(1.1); }
+    .btn.danger { border-color:#5a2a2a; background:#1b1010; color:#ffc8c8; }
+    .btn.ok { border-color:#2a5a3c; background:#0f1b15; color:#d4ffe8; }
+    .grid { display:grid; gap:16px; grid-template-columns: repeat(2, 1fr); margin-top:16px; }
+    @media (max-width: 900px){ .controls{grid-template-columns:1fr 1fr 1fr 1fr} .grid{grid-template-columns:1fr} }
+    .slot { display:grid; grid-template-rows:auto auto 1fr; gap:10px; }
+    .slot h3 { margin:0; font-size:18px; display:flex; align-items:center; justify-content:space-between; }
+    .pill { font-size:12px; padding:2px 8px; border-radius:999px; border:1px solid #2b3b55; color:var(--muted); }
+    .role-head { display:flex; gap:6px; align-items:center; font-weight:700; }
+    .role { border:1px dashed #2a3750; border-radius:12px; padding:10px; display:grid; gap:8px; }
+    .names { display:flex; flex-wrap:wrap; gap:8px; }
+    .tag { background:#0b121b; border:1px solid #223044; border-radius:999px; padding:6px 10px; display:flex; gap:8px; align-items:center; }
+    .tag button { border:none; background:transparent; color:var(--danger); font-weight:900; cursor:pointer; }
+    .counts { display:flex; gap:8px; align-items:center; }
+    .count { font-size:12px; color:var(--muted); }
+    .sep { height:1px; background:#1f2937; margin:6px 0; opacity:.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">十人副本报名接龙 <span class="muted">（ET，美东）</span></div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="controls">
+        <input id="nameInput" placeholder="角色名 / ID" />
+        <select id="roleSelect">
+          <option value="T">T</option>
+          <option value="DPS">DPS</option>
+          <option value="奶">奶</option>
+        </select>
+        <select id="slotSelect"></select>
+        <button id="addBtn">报名</button>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <div class="btns">
+          <button class="btn ok" id="exportCsv">导出 CSV</button>
+          <button class="btn" id="exportJson">导出 JSON</button>
+          <button class="btn" id="copyText">复制接龙文本</button>
+          <button class="btn danger" id="resetAll">清空所有报名</button>
+        </div>
+        <div class="counts" id="summary"></div>
+      </div>
+    </div>
+
+    <div class="grid" id="slotsGrid"></div>
+  </div>
+
+  <script>
+    (function(){
+      // 固定时间段（含周五末班车）
+      var TIME_SLOTS = [
+        { key: '周五 22:00 (ET) 末班车', label: '周五 22:00 (ET) 末班车' },
+        { key: '周日 21:00 (ET)', label: '周日 21:00 (ET)' },
+        { key: '周日 22:30 (ET)', label: '周日 22:30 (ET)' },
+        { key: '周日 23:00 (ET)', label: '周日 23:00 (ET)' },
+        { key: '周一 22:00 (ET)', label: '周一 22:00 (ET)' }
+      ];
+
+      var ROLES = ['T','DPS','奶'];
+      var CAPACITY = { T:1, DPS:7, '奶':2 };
+
+      var LS_KEY = 'raid_signup_web_v2';
+      function emptyRoster(){
+        var r = {}; 
+        for (var i=0;i<TIME_SLOTS.length;i++){
+          r[TIME_SLOTS[i].key] = { T:[], DPS:[], '奶':[] };
+        }
+        return r;
+      }
+      function load(){
+        try{
+          var raw = localStorage.getItem(LS_KEY);
+          if(!raw){ return emptyRoster(); }
+          var j = JSON.parse(raw);
+          // 兼容补齐
+          for(var i=0;i<TIME_SLOTS.length;i++){
+            var key = TIME_SLOTS[i].key;
+            if(!j[key]) j[key] = { T:[], DPS:[], '奶':[] };
+            for(var r=0;r<ROLES.length;r++){
+              var role = ROLES[r];
+              if(!j[key][role]) j[key][role] = [];
+            }
+          }
+          return j;
+        }catch(e){
+          return emptyRoster();
+        }
+      }
+      function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
+
+      var state = load();
+
+      var slotSelect = document.getElementById('slotSelect');
+      var roleSelect = document.getElementById('roleSelect');
+      var nameInput = document.getElementById('nameInput');
+      var addBtn = document.getElementById('addBtn');
+      var grid = document.getElementById('slotsGrid');
+      var summary = document.getElementById('summary');
+
+      // 填充下拉
+      for (var i=0;i<TIME_SLOTS.length;i++){
+        var s = TIME_SLOTS[i]; 
+        var opt = document.createElement('option'); opt.value = s.key; opt.textContent = s.label; slotSelect.appendChild(opt);
+      }
+
+      function escapeHtml(s){ return String(s).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
+
+      function tag(name, slotKey, role){
+        var span = document.createElement('span'); span.className = 'tag';
+        span.innerHTML = escapeHtml(name) + ' ';
+        var btn = document.createElement('button'); btn.type='button'; btn.title='移除'; btn.textContent='×';
+        btn.addEventListener('click', function(){
+          var arr = state[slotKey][role]; 
+          var idx = arr.indexOf(name);
+          if(idx>-1){ arr.splice(idx,1); render(); }
+        });
+        span.appendChild(btn);
+        return span.outerHTML;
+      }
+
+      function render(){
+        grid.innerHTML = '';
+        var total = 0, taken = 0;
+
+        for (var i=0;i<TIME_SLOTS.length;i++){
+          var s = TIME_SLOTS[i];
+          var rslot = state[s.key];
+          var T = rslot.T, DPS = rslot.DPS, H = rslot['奶'];
+          total += CAPACITY.T + CAPACITY.DPS + CAPACITY['奶'];
+          taken += T.length + DPS.length + H.length;
+
+          var slotDiv = document.createElement('div'); slotDiv.className = 'card slot';
+          var remain = (CAPACITY.T - T.length) + (CAPACITY.DPS - DPS.length) + (CAPACITY['奶'] - H.length);
+          slotDiv.innerHTML = ''
+          + '<h3><span>'+s.label+'</span><span class="pill">剩余 '+ remain +'</span></h3>'
+          + '<div class="role">'
+          +   '<div class="role-head">T <span class="count">(' + T.length + '/' + CAPACITY.T + ')</span></div>'
+          +   '<div class="names">' + (T.length? T.map(function(n){return tag(n,s.key,'T');}).join(''):'<span class="muted">—</span>') + '</div>'
+          +   '<div class="sep"></div>'
+          +   '<div class="role-head">DPS <span class="count">(' + DPS.length + '/' + CAPACITY.DPS + ')</span></div>'
+          +   '<div class="names">' + (DPS.length? DPS.map(function(n){return tag(n,s.key,'DPS');}).join(''):'<span class="muted">—</span>') + '</div>'
+          +   '<div class="sep"></div>'
+          +   '<div class="role-head">奶 <span class="count">(' + H.length + '/' + CAPACITY['奶'] + ')</span></div>'
+          +   '<div class="names">' + (H.length? H.map(function(n){return tag(n,s.key,'奶');}).join(''):'<span class="muted">—</span>') + '</div>'
+          + '</div>';
+          grid.appendChild(slotDiv);
+        }
+
+        summary.textContent = '总名额 ' + total + '，已报名 ' + taken + '，剩余 ' + (total - taken);
+        save();
+      }
+
+      addBtn.addEventListener('click', function(){
+        var name = (nameInput.value || '').trim();
+        if(!name){ alert('请输入角色名/ID'); return; }
+        var role = roleSelect.value;
+        var slotKey = slotSelect.value;
+
+        // 重复校验
+        for (var i=0;i<ROLES.length;i++){
+          var r = ROLES[i];
+          if(state[slotKey][r].indexOf(name) !== -1){ alert('该ID已在此时段以 ' + r + ' 报名'); return; }
+        }
+        if(state[slotKey][role].length >= CAPACITY[role]){ alert(slotKey + ' 的 ' + role + ' 名额已满'); return; }
+
+        state[slotKey][role].push(name);
+        nameInput.value='';
+        render();
+      });
+
+      document.getElementById('exportCsv').addEventListener('click', function(){
+        var rows = [['时间段','T(1)','DPS(7)','奶(2)']];
+        for (var i=0;i<TIME_SLOTS.length;i++){
+          var s = TIME_SLOTS[i]; var r = state[s.key];
+          rows.push([s.label, r.T.join(' | '), r.DPS.join(' | '), r['奶'].join(' | ')]);
+        }
+        var csv = rows.map(function(r){ return r.map(function(v){ v = (v||'')+''; return '"' + v.replace(/"/g,'""') + '"'; }).join(','); }).join('\n');
+        download('raid_signup.csv', csv, 'text/csv;charset=utf-8;');
+      });
+
+      document.getElementById('exportJson').addEventListener('click', function(){
+        download('raid_signup.json', JSON.stringify(state, null, 2), 'application/json;charset=utf-8;');
+      });
+
+      document.getElementById('copyText').addEventListener('click', function(){
+        var out = [];
+        for (var i=0;i<TIME_SLOTS.length;i++){
+          var s = TIME_SLOTS[i]; var r = state[s.key];
+          var tRem = CAPACITY.T - r.T.length;
+          var dRem = CAPACITY.DPS - r.DPS.length;
+          var hRem = CAPACITY['奶'] - r['奶'].length;
+          out.push('【'+s.label+'】\nT('+r.T.length+'/1)：'+(r.T.join('，')||'—')+'\nDPS('+r.DPS.length+'/7)：'+(r.DPS.join('，')||'—')+'\n奶('+r['奶'].length+'/2)：'+(r['奶'].join('，')||'—')+'\n剩余：T'+tRem+' / DPS'+dRem+' / 奶'+hRem);
+        }
+        copyText(out.join('\n\n')); alert('已复制接龙文本');
+      });
+
+      document.getElementById('resetAll').addEventListener('click', function(){
+        if(confirm('确认清空所有报名？')){ state = emptyRoster(); render(); }
+      });
+
+      function download(filename, content, mime){
+        var blob = new Blob([content], {type: mime});
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+      }
+      function copyText(t){
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(t)['catch'](function(){ fallbackCopy(t); });
+        }else{ fallbackCopy(t); }
+      }
+      function fallbackCopy(t){ var ta = document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+
+      // 初次渲染
+      render();
+    })();
+  </script>
+</body>
+</html>
